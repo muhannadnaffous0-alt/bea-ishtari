@@ -1,0 +1,144 @@
+rules_version = '2';
+// قواعد الحماية: مين بيقدر يقرأ ويكتب شو. المدير = أي حساب إلو مستند بمجموعة admins.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(uid())); }
+    function active() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(uid()))
+        && get(/databases/$(database)/documents/users/$(uid())).data.banned != true;
+    }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    // المدراء: بينضافوا يدوياً من Firebase Console فقط
+    match /admins/{id} {
+      allow read: if signedIn() && (uid() == id || isAdmin());
+      allow write: if false;
+    }
+
+    // إعدادات التطبيق (أسعار التمييز، طريقة الدفع، ملاحظة أمان)
+    match /config/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ملفات المستخدمين (عامة: الاسم، تاريخ الانضمام، التوثيق)
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if signedIn() && uid() == userId
+        && request.resource.data.keys().hasOnly(['name', 'joinedAt', 'phoneVerified', 'allowCall', 'contactPhone', 'banned'])
+        && request.resource.data.name is string && request.resource.data.name.size() >= 1 && request.resource.data.name.size() <= 40
+        && request.resource.data.joinedAt == request.time
+        && request.resource.data.phoneVerified == false && request.resource.data.allowCall == false
+        && request.resource.data.contactPhone == '' && request.resource.data.banned == false;
+      allow update: if isAdmin() || (
+        signedIn() && uid() == userId
+        && changed().hasOnly(['name', 'allowCall', 'contactPhone', 'phoneVerified'])
+        && request.resource.data.name is string && request.resource.data.name.size() >= 1 && request.resource.data.name.size() <= 40
+        && (request.resource.data.phoneVerified == false
+            || (request.auth.token.phone_number != null && request.resource.data.contactPhone == request.auth.token.phone_number))
+        && (request.resource.data.allowCall == false || request.resource.data.phoneVerified == true)
+      );
+      allow delete: if isAdmin();
+
+      match /favorites/{adId} { allow read, write: if signedIn() && uid() == userId; }
+      match /searches/{sid} { allow read, write: if signedIn() && uid() == userId; }
+
+      match /ratings/{raterId} {
+        allow read: if true;
+        allow create, update: if active() && uid() == raterId && raterId != userId
+          && request.resource.data.keys().hasOnly(['stars', 'text', 'at'])
+          && request.resource.data.stars is int && request.resource.data.stars >= 1 && request.resource.data.stars <= 5
+          && request.resource.data.text is string && request.resource.data.text.size() <= 300
+          && request.resource.data.at == request.time;
+        allow delete: if isAdmin() || (signedIn() && uid() == raterId);
+      }
+    }
+
+    function validAd(d) {
+      return d.title is string && d.title.size() >= 5 && d.title.size() <= 80
+        && d.desc is string && d.desc.size() <= 3000
+        && d.cat in ['cars', 'realestate', 'phones', 'furniture', 'jobs', 'services', 'animals', 'other']
+        && d.price is number && d.price >= 0
+        && d.cur in ['$', 'ل.س', '']
+        && d.city is string && d.city.size() <= 30
+        && d.area is string && d.area.size() <= 40
+        && d.thumb is string && d.thumb.size() < 80000
+        && d.imageCount is int && d.imageCount <= 6;
+    }
+
+    // الإعلانات
+    match /ads/{adId} {
+      allow read: if true;
+      allow create: if active() && request.resource.data.ownerId == uid()
+        && request.resource.data.status == 'active'
+        && request.resource.data.views == 0
+        && request.resource.data.featuredUntil == 0
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.bumpedAt == request.time
+        && validAd(request.resource.data);
+      allow update: if isAdmin()
+        // صاحب الإعلان: تعديل، إيقاف، تجديد (مرة كل ~يوم). ما بيقدر يميّز إعلانه لحاله أو يرجّع إعلان حذفته الإدارة
+        || (active() && resource.data.ownerId == uid() && resource.data.status != 'removed'
+            && !changed().hasAny(['ownerId', 'views', 'featuredUntil', 'createdAt', 'removedReason'])
+            && request.resource.data.status in ['active', 'paused']
+            && (!changed().hasAny(['bumpedAt'])
+                || (request.resource.data.bumpedAt == request.time && request.time > resource.data.bumpedAt + duration.value(20, 'h')))
+            && validAd(request.resource.data))
+        // أي زائر: زيادة عداد المشاهدات بواحد فقط
+        || (changed().hasOnly(['views']) && request.resource.data.views == resource.data.views + 1);
+      allow delete: if isAdmin() || (signedIn() && resource.data.ownerId == uid());
+
+      match /images/{imgId} {
+        allow read: if true;
+        allow create, update: if (isAdmin() || (active() && get(/databases/$(database)/documents/ads/$(adId)).data.ownerId == uid()))
+          && request.resource.data.data is string && request.resource.data.data.size() < 400000;
+        allow delete: if isAdmin() || (signedIn() && get(/databases/$(database)/documents/ads/$(adId)).data.ownerId == uid());
+      }
+    }
+
+    // الدردشة: بس الطرفين بيشوفوها (ولا حتى المدير)
+    match /chats/{chatId} {
+      allow read: if signedIn() && (resource == null || uid() in resource.data.participants);
+      allow create: if active()
+        && request.resource.data.buyerId == uid()
+        && chatId == request.resource.data.adId + '_' + uid()
+        && request.resource.data.sellerId == get(/databases/$(database)/documents/ads/$(request.resource.data.adId)).data.ownerId
+        && request.resource.data.sellerId != uid()
+        && request.resource.data.participants == [uid(), request.resource.data.sellerId];
+      allow update: if signedIn() && uid() in resource.data.participants
+        && changed().hasOnly(['lastMsg', 'lastFrom', 'lastAt', 'unread']);
+      allow delete: if isAdmin();
+
+      match /messages/{mid} {
+        allow read: if signedIn() && uid() in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow create: if active() && request.resource.data.from == uid()
+          && uid() in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
+          && request.resource.data.text is string && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 1000
+          && request.resource.data.at == request.time;
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
+    }
+
+    // البلاغات: أي مستخدم بيبلّغ، بس المدير بيشوفها
+    match /reports/{rid} {
+      allow create: if active() && request.resource.data.reporterId == uid()
+        && request.resource.data.status == 'open' && request.resource.data.at == request.time
+        && request.resource.data.note is string && request.resource.data.note.size() <= 500;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // طلبات تمييز الإعلانات (الدفع بيتأكد منه المدير)
+    match /featureRequests/{fid} {
+      allow create: if active() && request.resource.data.ownerId == uid()
+        && request.resource.data.status == 'pending' && request.resource.data.at == request.time
+        && get(/databases/$(database)/documents/ads/$(request.resource.data.adId)).data.ownerId == uid();
+      allow read: if isAdmin() || (signedIn() && resource.data.ownerId == uid());
+      allow update, delete: if isAdmin();
+    }
+  }
+}

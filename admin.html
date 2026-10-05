@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>لوحة الإدارة · بيع واشتري</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0f5c4d">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Reem+Kufi:wght@600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .app{max-width:980px;padding-bottom:40px}
+  .tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+  .tabs button{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 14px;font-weight:600;font-size:13.5px;display:inline-flex;gap:6px;align-items:center}
+  .tabs button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+  .tabs .n{background:var(--apricot);color:#fff;border-radius:9px;font-size:11px;padding:0 6px;min-width:18px;text-align:center}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+  .kpi b{display:block;font-size:26px;font-variant-numeric:tabular-nums;font-family:var(--display)}
+  .kpi span{color:var(--muted);font-size:13px}
+  .item{display:flex;gap:12px;align-items:flex-start}
+  .item .thumb{width:72px;height:72px}
+  .item .body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+  .item h3{margin:0;font-size:15px}
+  .plans{display:flex;flex-direction:column;gap:8px}
+  .plans .row{align-items:center}
+  .plans input{max-width:140px}
+  .uid{direction:ltr;font-family:ui-monospace,Menlo,monospace;font-size:13px;background:var(--surface-2);padding:8px 10px;border-radius:8px;word-break:break-all;user-select:all}
+</style>
+</head>
+<body>
+<div class="app" id="app"><main><div class="loading"><div class="skel"></div></div></main></div>
+<script type="module" src="admin.js"></script>
+</body>
+</html>
